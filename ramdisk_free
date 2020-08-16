@@ -5,6 +5,8 @@ if [ "$EUID" -ne 0 ]
   exit
 fi
 
-sudo umount /tmp/ramdisk
+umount /tmp/ramdisk
+
+echo 'Ramdisk removed.'
 
 exit
