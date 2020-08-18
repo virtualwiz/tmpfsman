@@ -1,0 +1,151 @@
+#!/bin/bash
+
+# Mount point configurations
+
+MNTSIZE='1G'
+MNTPOINT='/tmp/tmpfs/'
+MNTPERMISSION='777'
+MNTDEVICENAME='tmpfsman'
+
+# Temp files
+DIALOG_CACHE=/tmp/dialog_cache.$$$
+trap "rm ${DIALOG_CACHE}; exit" SIGHUP SIGINT SIGTERM
+
+# TUI configurations
+
+DIALOG=dialog
+BACKTITLE="TmpFSMan - mountpoint = ${MNTPOINT}"
+
+# Root privileges check
+
+if [ "$EUID" -ne 0 ]
+then
+    ${DIALOG} --backtitle "${BACKTITLE}" \
+              --msgbox 'Please run application as root.' 6 40
+    exit
+fi
+
+# Functions
+
+function Tmpfs_Create(){
+    ${DIALOG} --backtitle "${BACKTITLE}" --title 'Create Tmpfs' \
+              --inputbox 'Select a size limit for tmpfs.\nMemory is dynamically utilised rather than immediately allocated.' 0 0 ${MNTSIZE} \
+              2>"${DIALOG_CACHE}"
+    MNTSIZE=$(<"${DIALOG_CACHE}")
+
+    # Create mountpoint
+    
+    mkdir ${MNTPOINT}
+    if [ "$?" -gt 0 ]
+    then
+        ${DIALOG} --backtitle "${BACKTITLE}" --title 'ERROR' \
+                  --msgbox 'Cannot create mountpoint, skipping mount procedure.\nIs the tmpfs already initialised?' 0 0
+        return
+    fi
+
+    # Chmod mountpoint
+    
+    chmod ${MNTPERMISSION} ${MNTPOINT}
+
+    # Mount Tmpfs
+
+    mount -t tmpfs -o size=${MNTSIZE} ${MNTDEVICENAME} ${MNTPOINT}
+    if [ "$?" -gt 0 ]
+    then
+        rm -rf ${MNTPOINT}
+        ${DIALOG} --backtitle "${BACKTITLE}" --title 'ERROR' \
+                  --msgbox 'Cannot mount tmpfs.' 0 0
+        return
+    fi
+    
+    ${DIALOG} --backtitle "${BACKTITLE}" --title 'Create Tmpfs' \
+              --msgbox "Tmpfs at ${MNTPOINT} is now ready.\nsize is ${MNTSIZE}." 0 0
+}
+
+function Tmpfs_Monitor(){
+    (
+    while true
+    do
+        sleep 1
+        tmpfs_dfh=$(df -h | grep tmpfsman)
+        tmpfs_percent=$(echo ${tmpfs_dfh} | awk '{ print $5 }' | sed 's/%//g')
+        echo ${tmpfs_percent}
+        echo "XXX"
+        echo "Monitoring tmpfs.\n${tmpfs_dfh}"
+        echo "XXX"
+    done
+    ) |
+    dialog --backtitle "${BACKTITLE}" --title 'Monitor Tmpfs' \
+                   --gauge "Waiting for signal" 7 64
+}
+
+function Tmpfs_Flush(){
+    ${DIALOG} --backtitle "${BACKTITLE}" --title 'Flush Tmpfs' \
+              --yesno 'All files in the tmpfs will be LOST, and this is IRREVERSIBLE.\nAre you sure?' 0 0
+    if [ "$?" -gt 0 ]
+    then
+        ${DIALOG} --backtitle "${BACKTITLE}" \
+                  --msgbox 'Operation cancelled.' 0 0
+        return
+    fi
+    ${DIALOG} --backtitle "${BACKTITLE}" \
+              --infobox 'Flushing...' 0 0 ; rm -rf ${MNTPOINT}/*
+    ${DIALOG} --backtitle "${BACKTITLE}" --title 'Flush Tmpfs' \
+              --msgbox "Flushed tmpfs at mountpoint\n${MNTPOINT}" 0 0
+}
+
+function Tmpfs_Destroy(){
+    ${DIALOG} --backtitle "${BACKTITLE}" --title 'Destroy Tmpfs' \
+              --yesno 'All files in the tmpfs will be LOST, and the mountpoint folder will be REMOVED. this is IRREVERSIBLE.\nAre you sure?' 0 0
+    if [ "$?" -gt 0 ]
+    then
+        ${DIALOG} --backtitle "${BACKTITLE}" \
+                  --msgbox 'Operation cancelled.' 0 0
+        return
+    fi
+    umount ${MNTPOINT}
+    if [ "$?" -gt 0 ]
+    then
+        ${DIALOG} --backtitle "${BACKTITLE}" --title 'ERROR' \
+                  --msgbox 'Cannot umount tmpfs, aborting destroy.\nIs it in use?\nDoes it exist?' 0 0
+        return
+    fi
+    rm -rf ${MNTPOINT}
+    ${DIALOG} --backtitle "${BACKTITLE}" --title 'Destroy Tmpfs' \
+              --msgbox "Destroyed tmpfs at mountpoint\n${MNTPOINT}" 0 0
+}
+
+function Tmpfs_Help(){
+    ${DIALOG} --backtitle "${BACKTITLE}" --title 'TmpFSMan Help' --scrollbar --no-shadow \
+              --msgbox "TODO: Insert help information." -1 -1
+}
+
+# Main loop
+
+while true
+do
+    # Application menu
+    
+    ${DIALOG} --backtitle "${BACKTITLE}" \
+              --menu 'Choose an operation' 0 0 0 \
+              Create 'Initialise and mount tmpfs.' \
+              Monitor 'Show tmpfs usage.' \
+              Flush 'Wipe all files and folders in tmpfs.' \
+              Destroy 'Unmount tmpfs and de-initialise.' \
+              Help 'Show information about this program.' \
+              Exit 'Terminate this program.' \
+              2>"${DIALOG_CACHE}"
+
+    menu_selection=$(<"${DIALOG_CACHE}")
+
+    case ${menu_selection} in
+        Create) Tmpfs_Create;;
+        Monitor) Tmpfs_Monitor;;
+        Flush) Tmpfs_Flush;;
+        Destroy) Tmpfs_Destroy;;
+        Help) Tmpfs_Help;;
+        *) exit;;
+    esac
+    
+done
+          
